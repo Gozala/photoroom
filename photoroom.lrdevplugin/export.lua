@@ -1,13 +1,22 @@
 -- Lightroom SDK
 local binding = import("LrBinding")
 local view = import("LrView")
+local dialogs = import("LrDialogs")
+
+local prefs = import("LrPrefs").prefsForPlugin()
 
 local auth = require("authentication")
+local OAuth = require("oauth")
+local partial = require("partial")
+
+local console = require("console")
+
+local context = import("LrFunctionContext")
+callWithContext = context.callWithContext
 
 -- Common shortcuts
 local bind = view.bind
 local share = view.share
-
 
 local function updateCantExportBecause(propertyTable)
   if not propertyTable.validAccount then
@@ -24,9 +33,91 @@ local displayNameForTitleChoice = {
   empty = LOC "$$$/PhotoRoom/ExportDialog/Title/Empty=Leave Blank",
 }
 
+function makeClient(options)
+  return OAuth.new(options.auth.oauth_consumer_key,
+                   options.auth.oauth_consumer_secret, {
+    RequestToken = "http://" .. options.domain .. "/v1/oauth/token/request",
+    AccessToken = "http://" .. options.domain .. "/v1/oauth/token/access"
+  },
+  {
+    OAuthToken = options.auth.oauth_token,
+    OAuthTokenSecret = options.auth.oauth_token_secret,
+    OAuthVerifier = options.auth.oauth_verifier
+  })
+end
+
+function authorizationFailed(options)
+  options.accountStatus = LOC "$$$/PhotoRoom/AccountStatus/LoggingIn=Not authorized"
+  options.LR_cantExportBecause = LOC "$$$/PhotoRoom/ExportDialog/NoLogin=Failed to login to OpenPhoto."
+end
+
+function authorize(options)
+  console.log("authorizing...")
+
+  options.auth = nil
+  options.isAuthorized = false
+
+  options.accountStatus = LOC "$$$/PhotoRoom/AccountStatus/LoggingIn=Authorizing..."
+  local callback = partial(authorized, options)
+  auth.authorize(options.domain, callback)
+end
+
+function authorized(options, authorization)
+  console.log("authorized...")
+  -- Function is invoked once authorization flow has being complete.
+
+  options.auth = authorization
+  local client = makeClient(options)
+  OAuth.accessToken(client, function(error, response)
+    console.log({
+      type = "accessToken",
+      error = error,
+      response = response
+    })
+
+    if error then
+      authorizationFailed(options)
+    else
+      options.isAuthorized = true
+      options.accountStatus = LOC "$$$/PhotoRoom/AccountStatus/LoggingIn=Authorized"
+      validate(options)
+    end
+  end)
+end
+
+function validate(options)
+  console.log("validating...")
+
+  local client = makeClient(options)
+  OAuth.request(client, "GET", "http://" .. options.domain .. "/hello.json", {
+    auth = true
+  }, partial(validated, options))
+end
+
+function validated(...) --options, error, response)
+  local result = {...}
+  local options, error, response = ...
+
+  console.log({
+    type = "validated",
+    count = #result,
+    error = error,
+    response = response
+  })
+
+  if error then
+    console.log(error)
+    authorizationFailed(options)
+  else
+    options.validAccount = true
+  end
+end
+
 return {
   exportPresetFields = {
     { key = "domain", default = "current.openphoto.me" },
+    { key = "isAuthorized", default = false },
+    { key = "auth", default = nil },
 
     { key = "loginButtonTitle", default = "Authorize" },
     { key = 'accountStatus', default = "Not authorized" },
@@ -63,23 +154,13 @@ return {
   -- Method called when user selects plugin in the "Publishing Manager".
   startDialog = function(options)
 
-    -- Clear login if it's a new connection.
-
-    if not options.LR_editingExistingPublishConnection then
-      options.username = nil
-      options.nsid = nil
-      options.auth_token = nil
-    end
-
-    -- Can't export until we've validated the login.
-
-    options:addObserver("validAccount", function() updateCantExportBecause(options) end)
+    options:addObserver("validAccount",
+                         partial(updateCantExportBecause, options))
     updateCantExportBecause(options)
 
-    -- Make sure we're logged in.
-
-    -- require 'ServiceUser'
-    -- ServiceUser.verifyLogin(options)
+    if options.isAuthorized then
+      validate(options)
+    end
   end,
 
   -- Method is called when user selects plugin in the "Publishing Manager".
@@ -103,13 +184,7 @@ return {
 
           view:push_button({
             title = bind("loginButtonTitle"),
-            action = function()
-              options.accountStatus = LOC "$$$/PhotoRoom/AccountStatus/LoggingIn=Authorizing..."
-              auth.authorize(options.domain, function(athorization)
-                options.accountStatus = LOC "$$$/PhotoRoom/AccountStatus/LoggingIn=Authorized"
-                options.validAccount = true
-              end)
-            end
+            action = partial(authorize, options)
           })
         })
       },

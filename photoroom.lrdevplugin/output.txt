@@ -1,0 +1,12 @@
+Plug-in error log for plug-in at: /Users/gozala/Projects/photoroom/photoroom.lrdevplugin
+
+**** Error 1
+
+An error occurred while attempting to run one of the plug-in’s scripts.
+require: invalid characters in script name
+
+**** Error 2
+
+Could not load the post-processing filter from this plug-in.
+require: invalid characters in script name
+

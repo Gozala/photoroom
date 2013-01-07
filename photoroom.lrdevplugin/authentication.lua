@@ -7,14 +7,12 @@ local handler = require("uri-handler")
 local querystring = require("querystring")
 local info = require("Info")
 
-local console = import("LrLogger")("photo-room")
-console:enable("print")
-
-
 local postAsyncTaskWithContext = context.postAsyncTaskWithContext
+local console = require("console")
 
 return {
   authorize = function(domain, callback)
+    console.log("start athorization")
     postAsyncTaskWithContext("Open Photo authorization", function(context)
       dialogs.attachErrorDialogToFunctionContext(context)
 
@@ -28,9 +26,14 @@ return {
         return
       end
 
-      prefs:addObserver("auth", function() callback(prefs.auth) end)
+      local onAuth = function()
+        console.log("pref change")
+        prefs:removeObserver("auth", onAuth)
+        callback(prefs.auth)
+      end
+      prefs:addObserver("auth", onAuth)
 
-      local callback = "lightroom://" .. info.LrToolkitIdentifier
+      local callback = "lightroom://" .. info.LrToolkitIdentifier .. "/"
 
       http.openUrlInBrowser("http://" ..
                             domain ..

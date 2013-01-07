@@ -1,0 +1,3 @@
+[submodule "photoroom.lrdevplugin/modules/functional"]
+	path = photoroom.lrdevplugin/modules/functional
+	url = git://github.com/Gozala/functional-lua.git
